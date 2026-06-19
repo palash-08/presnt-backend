@@ -109,4 +109,22 @@ router.post('/user/:id', requireAuth, async (req: AuthRequest, res: Response): P
   }
 });
 
+/**
+ * GET /api/notifications/user/:id
+ * Get all notifications for a user.
+ */
+router.get('/user/:id', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const notifications = await prisma.notification.findMany({
+      where: { userId: req.params.id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json(notifications);
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({ error: 'Failed to fetch notifications' });
+  }
+});
+
 export default router;
