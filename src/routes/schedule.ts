@@ -77,6 +77,8 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response): Prom
       groupId: entry.groupId,
       scheduleId: req.params.id,
     });
+    // Also emit schedule-updated so all frontend tabs reload automatically
+    getIO().to(`group:${entry.groupId}`).emit('schedule-updated', { groupId: entry.groupId });
 
     res.json({ success: true });
   } catch (error) {
