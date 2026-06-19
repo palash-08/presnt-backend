@@ -96,7 +96,7 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response): Prom
         }
 
         // 2. Rollback AttendanceRecords
-        const userHistories = new Map<string, typeof histories>();
+        const userHistories = new Map<string, any[]>();
         for (const h of histories) {
           if (!userHistories.has(h.userId)) userHistories.set(h.userId, []);
           userHistories.get(h.userId)!.push(h);
