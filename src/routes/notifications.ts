@@ -12,6 +12,7 @@ const router = Router();
  */
 router.post('/group/:id', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const id = req.params.id as string;
     const { title, body, data } = req.body;
     if (!title || !body) {
       res.status(400).json({ error: 'title and body are required' });
@@ -20,7 +21,7 @@ router.post('/group/:id', requireAuth, async (req: AuthRequest, res: Response): 
 
     // Fetch group members with push tokens
     const members = await prisma.groupMember.findMany({
-      where: { groupId: req.params.id },
+      where: { groupId: id },
       include: {
         user: {
           select: { id: true, expoPushToken: true },
@@ -66,6 +67,7 @@ router.post('/group/:id', requireAuth, async (req: AuthRequest, res: Response): 
  */
 router.post('/user/:id', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const id = req.params.id as string;
     const { title, body, data } = req.body;
     if (!title || !body) {
       res.status(400).json({ error: 'title and body are required' });
@@ -73,7 +75,7 @@ router.post('/user/:id', requireAuth, async (req: AuthRequest, res: Response): P
     }
 
     const user = await prisma.user.findUnique({
-      where: { id: req.params.id },
+      where: { id },
       select: { id: true, expoPushToken: true },
     });
 
@@ -115,8 +117,9 @@ router.post('/user/:id', requireAuth, async (req: AuthRequest, res: Response): P
  */
 router.get('/user/:id', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const id = req.params.id as string;
     const notifications = await prisma.notification.findMany({
-      where: { userId: req.params.id },
+      where: { userId: id },
       orderBy: { createdAt: 'desc' },
     });
 

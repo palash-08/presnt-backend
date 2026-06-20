@@ -66,7 +66,8 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response): Promise<v
  */
 router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const entry = await prisma.schedule.findUnique({ where: { id: req.params.id } });
+    const id = req.params.id as string;
+    const entry = await prisma.schedule.findUnique({ where: { id } });
     if (!entry) {
       res.status(404).json({ error: 'Schedule entry not found' });
       return;
@@ -74,7 +75,7 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response): Prom
 
     // ─── Attendance Rollback Logic ───────────────────────────────────────────
     const histories = await prisma.attendanceHistory.findMany({
-      where: { slotId: req.params.id },
+      where: { slotId: id },
     });
 
     if (histories.length > 0) {
@@ -128,10 +129,10 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response): Prom
 
     // ─── End Attendance Rollback ─────────────────────────────────────────────
 
-    await prisma.schedule.delete({ where: { id: req.params.id } });
+    await prisma.schedule.delete({ where: { id } });
     getIO().to(`group:${entry.groupId}`).emit('schedule-deleted', {
       groupId: entry.groupId,
-      scheduleId: req.params.id,
+      scheduleId: id,
     });
     // Also emit schedule-updated so all frontend tabs reload automatically
     getIO().to(`group:${entry.groupId}`).emit('schedule-updated', { groupId: entry.groupId });

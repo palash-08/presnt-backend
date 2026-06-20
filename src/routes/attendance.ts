@@ -41,6 +41,10 @@ router.get('/students', requireAuth, async (req: AuthRequest, res: Response): Pr
 
     const dateKey = slotId ? `${date}_${slotId}` : (date as string);
 
+    const group = await prisma.group.findUnique({
+      where: { id: groupId as string },
+    });
+
     // Fetch group members with their profiles
     const members = await prisma.groupMember.findMany({
       where: { groupId: groupId as string },
@@ -51,10 +55,12 @@ router.get('/students', requireAuth, async (req: AuthRequest, res: Response): Pr
       },
     });
 
-    // Filter out teachers
-    const students = members.filter(
-      (m) => m.role !== 'Teacher' && m.user.role !== 'teacher'
-    );
+    // Filter out teachers, EXCEPT in personal groups where we just want the members
+    const students = group?.isPersonal
+      ? members
+      : members.filter(
+          (m) => m.role !== 'Teacher' && m.user.role !== 'teacher'
+        );
 
     // Fetch attendance history for all students in one query
     const histories = await prisma.attendanceHistory.findMany({
@@ -113,7 +119,7 @@ router.get('/:subjectId/history', requireAuth, async (req: AuthRequest, res: Res
     const history = await prisma.attendanceHistory.findMany({
       where: {
         userId,
-        subjectId: req.params.subjectId,
+        subjectId: req.params.subjectId as string,
       },
       orderBy: { date: 'desc' },
     });

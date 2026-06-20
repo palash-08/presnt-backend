@@ -38,10 +38,12 @@ router.get('/attendance', requireAuth, async (req: AuthRequest, res: Response): 
       return;
     }
 
-    // 2. Filter students (exclude teachers)
-    const students = group.members.filter(
-      (m) => m.role !== 'Teacher' && m.user.role !== 'teacher'
-    );
+    // Filter out teachers, EXCEPT in personal groups where we just want the members
+    const students = group.isPersonal
+      ? group.members
+      : group.members.filter(
+          (m) => m.role !== 'Teacher' && m.user.role !== 'teacher'
+        );
 
     const studentProfiles: Record<string, { name: string; email: string; rollNumber: string }> = {};
     students.forEach((m) => {

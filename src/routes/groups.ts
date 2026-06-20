@@ -23,6 +23,7 @@ async function buildGroupResponse(groupId: string) {
     id: group.id,
     name: group.name,
     creatorId: group.creatorId,
+    isPersonal: group.isPersonal,
     createdAt: group.createdAt,
     members,
     roles,
@@ -57,7 +58,7 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response): Promise<vo
  */
 router.post('/', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { name, role } = req.body;
+    const { name, role, isPersonal } = req.body;
     if (!name?.trim()) {
       res.status(400).json({ error: 'Group name is required' });
       return;
@@ -67,6 +68,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response): Promise<v
       data: {
         name: name.trim(),
         creatorId: req.user!.id,
+        isPersonal: !!isPersonal,
         members: {
           create: {
             userId: req.user!.id,
@@ -76,7 +78,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response): Promise<v
       },
     });
 
-    res.status(201).json({ id: group.id, name: group.name, creatorId: group.creatorId });
+    res.status(201).json({ id: group.id, name: group.name, creatorId: group.creatorId, isPersonal: group.isPersonal });
   } catch (error) {
     console.error('Error creating group:', error);
     res.status(500).json({ error: 'Failed to create group' });
@@ -89,7 +91,8 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response): Promise<v
  */
 router.get('/:id', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const group = await buildGroupResponse(req.params.id);
+    const id = req.params.id as string;
+    const group = await buildGroupResponse(id);
     if (!group) {
       res.status(404).json({ error: 'Group not found' });
       return;
@@ -107,7 +110,8 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response): Promise
  */
 router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const group = await prisma.group.findUnique({ where: { id: req.params.id } });
+    const id = req.params.id as string;
+    const group = await prisma.group.findUnique({ where: { id } });
     if (!group) {
       res.status(404).json({ error: 'Group not found' });
       return;
@@ -117,8 +121,8 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response): Prom
       return;
     }
 
-    await prisma.group.delete({ where: { id: req.params.id } });
-    getIO().to(`group:${req.params.id}`).emit('group-deleted', { groupId: req.params.id });
+    await prisma.group.delete({ where: { id } });
+    getIO().to(`group:${id}`).emit('group-deleted', { groupId: id });
 
     res.json({ success: true });
   } catch (error) {
@@ -133,8 +137,9 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response): Prom
  */
 router.get('/:id/members', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const id = req.params.id as string;
     const members = await prisma.groupMember.findMany({
-      where: { groupId: req.params.id },
+      where: { groupId: id },
       include: {
         user: {
           select: { id: true, name: true, email: true, rollNumber: true },
@@ -163,15 +168,21 @@ router.get('/:id/members', requireAuth, async (req: AuthRequest, res: Response):
  */
 router.post('/:id/join', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const group = await prisma.group.findUnique({ where: { id: req.params.id } });
+    const id = req.params.id as string;
+    const group = await prisma.group.findUnique({ where: { id } });
     if (!group) {
       res.status(404).json({ error: 'Invalid invite code. Group not found.' });
       return;
     }
 
+    if (group.isPersonal) {
+      res.status(403).json({ error: 'This is a private individual group and cannot be joined.' });
+      return;
+    }
+
     // Check if already a member
     const existing = await prisma.groupMember.findUnique({
-      where: { userId_groupId: { userId: req.user!.id, groupId: req.params.id } },
+      where: { userId_groupId: { userId: req.user!.id, groupId: id } },
     });
     if (existing) {
       res.status(400).json({ error: 'You are already a member of this group.' });
@@ -181,13 +192,13 @@ router.post('/:id/join', requireAuth, async (req: AuthRequest, res: Response): P
     await prisma.groupMember.create({
       data: {
         userId: req.user!.id,
-        groupId: req.params.id,
+        groupId: id,
         role: 'Student',
       },
     });
 
-    getIO().to(`group:${req.params.id}`).emit('member-joined', {
-      groupId: req.params.id,
+    getIO().to(`group:${id}`).emit('member-joined', {
+      groupId: id,
       userId: req.user!.id,
     });
 
@@ -204,12 +215,13 @@ router.post('/:id/join', requireAuth, async (req: AuthRequest, res: Response): P
  */
 router.post('/:id/leave', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const id = req.params.id as string;
     await prisma.groupMember.delete({
-      where: { userId_groupId: { userId: req.user!.id, groupId: req.params.id } },
+      where: { userId_groupId: { userId: req.user!.id, groupId: id } },
     });
 
-    getIO().to(`group:${req.params.id}`).emit('member-left', {
-      groupId: req.params.id,
+    getIO().to(`group:${id}`).emit('member-left', {
+      groupId: id,
       userId: req.user!.id,
     });
 
@@ -226,6 +238,7 @@ router.post('/:id/leave', requireAuth, async (req: AuthRequest, res: Response): 
  */
 router.patch('/:id/roles', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const id = req.params.id as string;
     const { memberId, role } = req.body;
     if (!memberId || !role) {
       res.status(400).json({ error: 'memberId and role are required' });
@@ -234,9 +247,9 @@ router.patch('/:id/roles', requireAuth, async (req: AuthRequest, res: Response):
 
     // Verify requester has permission
     const requesterMember = await prisma.groupMember.findUnique({
-      where: { userId_groupId: { userId: req.user!.id, groupId: req.params.id } },
+      where: { userId_groupId: { userId: req.user!.id, groupId: id } },
     });
-    const group = await prisma.group.findUnique({ where: { id: req.params.id } });
+    const group = await prisma.group.findUnique({ where: { id } });
 
     if (!requesterMember || !group) {
       res.status(404).json({ error: 'Group not found' });
@@ -253,11 +266,11 @@ router.patch('/:id/roles', requireAuth, async (req: AuthRequest, res: Response):
     }
 
     await prisma.groupMember.update({
-      where: { userId_groupId: { userId: memberId, groupId: req.params.id } },
+      where: { userId_groupId: { userId: memberId, groupId: id } },
       data: { role },
     });
 
-    getIO().to(`group:${req.params.id}`).emit('group-updated', { groupId: req.params.id });
+    getIO().to(`group:${id}`).emit('group-updated', { groupId: id });
 
     res.json({ success: true });
   } catch (error) {

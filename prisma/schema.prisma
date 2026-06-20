@@ -32,10 +32,11 @@ model User {
 
 // ─── Groups ─────────────────────────────────────────────────────────────────
 model Group {
-  id        String   @id @default(cuid()) // short, human-readable invite code
-  name      String
-  creatorId String
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid()) // short, human-readable invite code
+  name       String
+  creatorId  String
+  isPersonal Boolean  @default(false)
+  createdAt  DateTime @default(now())
 
   members   GroupMember[]
   subjects  Subject[]

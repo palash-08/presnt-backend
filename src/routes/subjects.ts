@@ -65,6 +65,7 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response): Promise<v
  */
 router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const id = req.params.id as string;
     const { name, code, credits, totalClasses, classDates } = req.body;
     const updateData: Record<string, any> = {};
 
@@ -75,7 +76,7 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response): Promi
     if (classDates !== undefined) updateData.classDates = classDates;
 
     const subject = await prisma.subject.update({
-      where: { id: req.params.id },
+      where: { id },
       data: updateData,
     });
 
@@ -93,16 +94,17 @@ router.patch('/:id', requireAuth, async (req: AuthRequest, res: Response): Promi
  */
 router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const subject = await prisma.subject.findUnique({ where: { id: req.params.id } });
+    const id = req.params.id as string;
+    const subject = await prisma.subject.findUnique({ where: { id } });
     if (!subject) {
       res.status(404).json({ error: 'Subject not found' });
       return;
     }
 
-    await prisma.subject.delete({ where: { id: req.params.id } });
+    await prisma.subject.delete({ where: { id } });
     getIO().to(`group:${subject.groupId}`).emit('subject-deleted', {
       groupId: subject.groupId,
-      subjectId: req.params.id,
+      subjectId: id,
     });
     // Also emit updated events so all frontend tabs reload automatically
     getIO().to(`group:${subject.groupId}`).emit('subjects-updated', { groupId: subject.groupId });
