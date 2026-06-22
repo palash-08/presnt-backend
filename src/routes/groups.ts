@@ -257,7 +257,7 @@ router.patch('/:id/roles', requireAuth, async (req: AuthRequest, res: Response):
     }
 
     const isCreator = group.creatorId === req.user!.id;
-    const requesterRole = isCreator ? 'Admin' : requesterMember.role;
+    const requesterRole = requesterMember.role || (isCreator ? 'Admin' : 'Student');
     const canChangeRoles = ['Admin', 'Co-Admin', 'Teacher'].includes(requesterRole);
 
     if (!canChangeRoles) {
