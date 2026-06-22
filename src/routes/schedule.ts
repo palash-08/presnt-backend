@@ -73,6 +73,44 @@ router.delete('/:id', requireAuth, async (req: AuthRequest, res: Response): Prom
       return;
     }
 
+    // Restrict deletion if slot time has passed in the current week
+    const dayIndexMap: Record<string, number> = {
+      'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3,
+      'Thursday': 4, 'Friday': 5, 'Saturday': 6
+    };
+    
+    const today = new Date();
+    const todayDayIndex = today.getDay();
+    const targetDayIndex = dayIndexMap[entry.dayOfWeek];
+    
+    if (targetDayIndex !== undefined) {
+      const todayOrder = todayDayIndex === 0 ? 7 : todayDayIndex;
+      const targetOrder = targetDayIndex === 0 ? 7 : targetDayIndex;
+      
+      let isPassed = false;
+      if (targetOrder < todayOrder) {
+        isPassed = true;
+      } else if (targetOrder === todayOrder) {
+        const parts = entry.time.split('-');
+        if (parts.length === 2) {
+          const endTimeStr = parts[1].trim();
+          const [hoursStr, minutesStr] = endTimeStr.split(':');
+          const hours = parseInt(hoursStr, 10);
+          const minutes = parseInt(minutesStr, 10);
+          if (!isNaN(hours) && !isNaN(minutes)) {
+            const slotEndTime = new Date(today);
+            slotEndTime.setHours(hours, minutes, 0, 0);
+            isPassed = today.getTime() > slotEndTime.getTime();
+          }
+        }
+      }
+      
+      if (isPassed) {
+        res.status(400).json({ error: 'Cannot delete a schedule slot whose time has already passed' });
+        return;
+      }
+    }
+
     // ─── Attendance Rollback Logic ───────────────────────────────────────────
     const histories = await prisma.attendanceHistory.findMany({
       where: { slotId: id },

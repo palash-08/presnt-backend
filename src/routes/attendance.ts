@@ -55,11 +55,12 @@ router.get('/students', requireAuth, async (req: AuthRequest, res: Response): Pr
       },
     });
 
-    // Filter out teachers, EXCEPT in personal groups where we just want the members
+    // Filter out non-students (Teachers, Admins, Co-Admins), EXCEPT in personal groups
+    const NON_STUDENT_ROLES = ['Teacher', 'Admin', 'Co-Admin'];
     const students = group?.isPersonal
       ? members
       : members.filter(
-          (m) => m.role !== 'Teacher' && m.user.role !== 'teacher'
+          (m) => !NON_STUDENT_ROLES.includes(m.role) && m.user.role !== 'teacher' && m.user.role !== 'admin'
         );
 
     // Fetch attendance history for all students in one query
