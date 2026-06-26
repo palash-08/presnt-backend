@@ -164,7 +164,7 @@ router.get('/:id/members', requireAuth, async (req: AuthRequest, res: Response):
 
 /**
  * POST /api/groups/:id/join
- * Join a group using its invite code (the group ID).
+ * Join a group using its invite code (the group ID) by submitting a join request.
  */
 router.post('/:id/join', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -189,20 +189,42 @@ router.post('/:id/join', requireAuth, async (req: AuthRequest, res: Response): P
       return;
     }
 
-    await prisma.groupMember.create({
+    // Check if join request already exists
+    const existingRequest = await prisma.joinRequest.findUnique({
+      where: { userId_groupId: { userId: req.user!.id, groupId: id } },
+    });
+
+    if (existingRequest) {
+      res.json({ 
+        success: true, 
+        status: 'PENDING', 
+        groupName: group.name,
+        message: 'You have already submitted a join request for this group. Please wait for approval.' 
+      });
+      return;
+    }
+
+    // Create a new JoinRequest
+    await prisma.joinRequest.create({
       data: {
         userId: req.user!.id,
         groupId: id,
-        role: 'Student',
+        status: 'PENDING',
       },
     });
 
-    getIO().to(`group:${id}`).emit('member-joined', {
+    // Alert group of new join request
+    getIO().to(`group:${id}`).emit('join-request-created', {
       groupId: id,
       userId: req.user!.id,
     });
 
-    res.json({ success: true, groupName: group.name });
+    res.json({ 
+      success: true, 
+      status: 'PENDING', 
+      groupName: group.name,
+      message: 'Join request submitted. Waiting for approval.' 
+    });
   } catch (error) {
     console.error('Error joining group:', error);
     res.status(500).json({ error: 'Failed to join group' });
@@ -276,6 +298,218 @@ router.patch('/:id/roles', requireAuth, async (req: AuthRequest, res: Response):
   } catch (error) {
     console.error('Error updating role:', error);
     res.status(500).json({ error: 'Failed to update role' });
+  }
+});
+
+/**
+ * GET /api/groups/:id/requests
+ * Get all pending join requests for a group. Only Admin/Co-Admin/Teacher can access this.
+ */
+router.get('/:id/requests', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+    
+    // Check if requester has permission
+    const requesterMember = await prisma.groupMember.findUnique({
+      where: { userId_groupId: { userId: req.user!.id, groupId: id } },
+    });
+    const group = await prisma.group.findUnique({ where: { id } });
+    if (!group) {
+      res.status(404).json({ error: 'Group not found' });
+      return;
+    }
+    const isCreator = group.creatorId === req.user!.id;
+    const role = requesterMember?.role || (isCreator ? 'Admin' : 'Student');
+    const hasAccess = ['Admin', 'Co-Admin', 'Teacher'].includes(role);
+
+    if (!hasAccess) {
+      res.status(403).json({ error: 'Only Admin, Co-Admin, or Teacher can view join requests' });
+      return;
+    }
+
+    const requests = await prisma.joinRequest.findMany({
+      where: { groupId: id, status: 'PENDING' },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            rollNumber: true,
+          }
+        }
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    res.json(requests);
+  } catch (error) {
+    console.error('Error fetching join requests:', error);
+    res.status(500).json({ error: 'Failed to fetch join requests' });
+  }
+});
+
+/**
+ * POST /api/groups/:id/requests/:requestId/respond
+ * Approve or reject a join request. Only Admin/Co-Admin/Teacher can do this.
+ */
+router.post('/:id/requests/:requestId/respond', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+    const requestId = req.params.requestId as string;
+    const { action } = req.body; // "APPROVE" | "REJECT"
+
+    if (!['APPROVE', 'REJECT'].includes(action)) {
+      res.status(400).json({ error: 'Invalid action. Must be APPROVE or REJECT' });
+      return;
+    }
+
+    // Verify requester has permission
+    const requesterMember = await prisma.groupMember.findUnique({
+      where: { userId_groupId: { userId: req.user!.id, groupId: id } },
+    });
+    const group = await prisma.group.findUnique({ where: { id } });
+    if (!group) {
+      res.status(404).json({ error: 'Group not found' });
+      return;
+    }
+    const isCreator = group.creatorId === req.user!.id;
+    const role = requesterMember?.role || (isCreator ? 'Admin' : 'Student');
+    const hasAccess = ['Admin', 'Co-Admin', 'Teacher'].includes(role);
+
+    if (!hasAccess) {
+      res.status(403).json({ error: 'Only Admin, Co-Admin, or Teacher can respond to join requests' });
+      return;
+    }
+
+    // Get the request details
+    const joinRequest = await prisma.joinRequest.findUnique({
+      where: { id: requestId },
+      include: { user: true }
+    });
+    if (!joinRequest || joinRequest.groupId !== id) {
+      res.status(404).json({ error: 'Join request not found' });
+      return;
+    }
+
+    if (action === 'APPROVE') {
+      // Create group member
+      await prisma.groupMember.upsert({
+        where: { userId_groupId: { userId: joinRequest.userId, groupId: id } },
+        update: { role: 'Student' },
+        create: {
+          userId: joinRequest.userId,
+          groupId: id,
+          role: 'Student',
+        }
+      });
+
+      // Send a push/in-app notification to the approved user
+      await prisma.notification.create({
+        data: {
+          userId: joinRequest.userId,
+          title: 'Join Request Approved',
+          body: `Your request to join the group "${group.name}" was approved!`,
+          data: { groupId: id, type: 'join-request-approved' }
+        }
+      });
+
+      // Emit real-time events to both group room and user room
+      getIO().to(`group:${id}`).emit('member-joined', {
+        groupId: id,
+        userId: joinRequest.userId,
+      });
+      getIO().to(`user:${joinRequest.userId}`).emit('join-request-approved', {
+        groupId: id,
+        groupName: group.name,
+      });
+    }
+
+    // Delete request after responding
+    await prisma.joinRequest.delete({ where: { id: requestId } });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error responding to join request:', error);
+    res.status(500).json({ error: 'Failed to respond to join request' });
+  }
+});
+
+/**
+ * DELETE /api/groups/:id/members/:memberId
+ * Remove a member from a group. Only Admin, Co-Admin, or Teacher can do this.
+ */
+router.delete('/:id/members/:memberId', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+    const memberId = req.params.memberId as string;
+
+    const group = await prisma.group.findUnique({ where: { id } });
+    if (!group) {
+      res.status(404).json({ error: 'Group not found' });
+      return;
+    }
+
+    // Check requester permissions
+    const requesterMember = await prisma.groupMember.findUnique({
+      where: { userId_groupId: { userId: req.user!.id, groupId: id } },
+    });
+    if (!requesterMember) {
+      res.status(403).json({ error: 'You are not a member of this group' });
+      return;
+    }
+
+    // Check target membership
+    const targetMember = await prisma.groupMember.findUnique({
+      where: { userId_groupId: { userId: memberId, groupId: id } },
+    });
+    if (!targetMember) {
+      res.status(404).json({ error: 'Member not found in this group' });
+      return;
+    }
+
+    const isCreator = group.creatorId === req.user!.id;
+    const requesterRole = requesterMember.role || (isCreator ? 'Admin' : 'Student');
+    const targetRole = targetMember.role;
+
+    // Hierarchy check:
+    // Admin can remove Co-Admin, Teacher, Student
+    // Co-Admin can remove Teacher, Student
+    // Teacher can remove Student
+    let allowed = false;
+    if (requesterRole === 'Admin') {
+      if (req.user!.id !== memberId) { // Can't remove yourself
+        allowed = true;
+      }
+    } else if (requesterRole === 'Co-Admin') {
+      if (targetRole === 'Teacher' || targetRole === 'Student') {
+        allowed = true;
+      }
+    } else if (requesterRole === 'Teacher') {
+      if (targetRole === 'Student') {
+        allowed = true;
+      }
+    }
+
+    if (!allowed) {
+      res.status(403).json({ error: 'You do not have permission to remove this member' });
+      return;
+    }
+
+    await prisma.groupMember.delete({
+      where: { userId_groupId: { userId: memberId, groupId: id } },
+    });
+
+    getIO().to(`group:${id}`).emit('member-left', {
+      groupId: id,
+      userId: memberId,
+    });
+    getIO().to(`group:${id}`).emit('group-updated', { groupId: id });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error removing member:', error);
+    res.status(500).json({ error: 'Failed to remove member' });
   }
 });
 
